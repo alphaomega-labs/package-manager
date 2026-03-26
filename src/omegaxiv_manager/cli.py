@@ -5,10 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 from omegaxiv_manager.registry import RegistryClient, ResolvedPackage
 from omegaxiv_manager.state import InstallState, StateStore
@@ -155,7 +155,15 @@ def _run_command(args: argparse.Namespace, registry: RegistryClient, state: Stat
             venv_path=venv_path,
             python_executable=python_executable,
         )
-        print(_install_summary("upgraded", resolved.handle, resolved.version, install_mode, venv_path))
+        print(
+            _install_summary(
+                "upgraded",
+                resolved.handle,
+                resolved.version,
+                install_mode,
+                venv_path,
+            )
+        )
         return
 
     if args.command == "uninstall":
@@ -332,6 +340,9 @@ def _install_mcp_targets(
     config = _resolve_mcp_config(resolved.handle, manifest, installed)
     if config is None:
         return ["MCP registration skipped: package manifest does not declare an MCP server."]
+    validation_error = _validate_mcp_config(config)
+    if validation_error is not None:
+        return [f"MCP registration skipped: {validation_error}"]
     summaries = []
     for target in _selected_mcp_targets(target_selector):
         try:
@@ -408,6 +419,40 @@ def _mcp_python_command(installed: InstallState) -> str:
     return sys.executable
 
 
+def _validate_mcp_config(config: dict[str, object]) -> str | None:
+    command = _require_text(config.get("command"), "manifest MCP command")
+    args = _string_list(config.get("args"))
+    if len(args) >= 2 and args[0] == "-m":
+        return _validate_python_module_entrypoint(command, args[1])
+    if Path(command).is_absolute():
+        if not Path(command).exists():
+            return f"manifest MCP command does not exist: {command}"
+        return None
+    if shutil.which(command) is None:
+        return f"manifest MCP command is not on PATH: {command}"
+    return None
+
+
+def _validate_python_module_entrypoint(command: str, module_name: str) -> str | None:
+    result = subprocess.run(
+        [
+            command,
+            "-c",
+            (
+                "import importlib.util, sys; "
+                "sys.exit(0 if importlib.util.find_spec(sys.argv[1]) else 1)"
+            ),
+            module_name,
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if result.returncode == 0:
+        return None
+    return f"installed package does not expose MCP module '{module_name}'"
+
+
 def _selected_mcp_targets(value: str) -> tuple[str, ...]:
     if value == "all":
         return ("codex", "claude")
@@ -420,7 +465,8 @@ def _install_codex_mcp_server(config: dict[str, object]) -> tuple[Path, bool]:
     existing = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
     server_name = _require_text(config.get("server_name"), "manifest MCP server_name")
     block = [f"[mcp_servers.{server_name}]"]
-    block.append(f'command = {_toml_quote(_require_text(config.get("command"), "manifest MCP command"))}')
+    command = _require_text(config.get("command"), "manifest MCP command")
+    block.append(f"command = {_toml_quote(command)}")
     block.append(f"args = {_toml_args(_string_list(config.get('args')))}")
     cwd = _as_str(config.get("cwd"))
     if cwd is not None:
