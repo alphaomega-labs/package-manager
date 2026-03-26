@@ -23,6 +23,7 @@ class ResolvedPackage:
     summary: str
     record_url: str
     index_url: str
+    manifest_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -66,11 +67,14 @@ class RegistryClient:
         if selected_version is None:
             raise ValueError(f"release metadata is invalid for {resolved_handle}")
         distribution_name = _as_str(selected.get("distribution_name")) or resolved_handle
-        install_target = _as_str(selected.get("install_target"))
-        if install_target is None:
-            install_target = _first_artifact_url(selected) or distribution_name
         repo_url = _as_str(record.get("repo_url")) or _as_str(entry.get("repo_url"))
         repo_raw_base_url = _repo_raw_base_url(repo_url)
+        install_target = _resolve_install_target(
+            registry_base_url=self._base_url,
+            repo_raw_base_url=repo_raw_base_url,
+            release=selected,
+            target=_as_str(selected.get("install_target")),
+        ) or distribution_name
         requirements_url = _resolve_release_file_url(
             registry_base_url=self._base_url,
             repo_raw_base_url=repo_raw_base_url,
@@ -83,6 +87,12 @@ class RegistryClient:
             release=selected,
             path=_as_str(selected.get("dependency_graph_path")),
         )
+        manifest_url = _resolve_release_file_url(
+            registry_base_url=self._base_url,
+            repo_raw_base_url=repo_raw_base_url,
+            release=selected,
+            path=_as_str(selected.get("manifest_path")),
+        )
         return ResolvedPackage(
             handle=resolved_handle,
             version=selected_version,
@@ -90,11 +100,17 @@ class RegistryClient:
             install_target=install_target,
             requirements_url=requirements_url,
             dependency_graph_url=dependency_graph_url,
+            manifest_url=manifest_url,
             package_type=_as_str(record.get("package_type")) or "library",
             summary=_as_str(entry.get("summary")) or "",
             record_url=record_url,
             index_url=self.index_url,
         )
+
+    def load_manifest(self, manifest_url: str | None) -> dict[str, object] | None:
+        if manifest_url is None:
+            return None
+        return self._read_json(manifest_url)
 
     def search(self, query: str) -> list[SearchResult]:
         index = self._read_json(self.index_url)
@@ -188,12 +204,39 @@ def _first_artifact_url(release: dict[str, object]) -> str | None:
     return None
 
 
+def _resolve_install_target(
+    *,
+    registry_base_url: str,
+    repo_raw_base_url: str | None,
+    release: dict[str, object],
+    target: str | None,
+) -> str | None:
+    if target is None:
+        return _first_artifact_url(release)
+    if _is_remote_install_target(target):
+        return target
+    if not _looks_like_release_path(target):
+        return target
+    release_path = _extract_release_path(target)
+    if release_path is None:
+        return target
+    artifact_url = _artifact_url_for_path(release, release_path)
+    if artifact_url is not None:
+        return artifact_url
+    return _resolve_release_file_url(
+        registry_base_url=registry_base_url,
+        repo_raw_base_url=repo_raw_base_url,
+        release=release,
+        path=release_path,
+    )
+
+
 def _default_base_url() -> str:
     direct = os.environ.get("OX_REGISTRY_BASE_URL", "").strip()
     if direct:
         return direct
-    org = os.environ.get("OX_REGISTRY_ORG", "omegaXiv-labs").strip() or "omegaXiv-labs"
-    repo = os.environ.get("OX_REGISTRY_REPO", "omegaxiv-registry").strip() or "omegaxiv-registry"
+    org = os.environ.get("OX_REGISTRY_ORG", "alphaomega-labs").strip() or "alphaomega-labs"
+    repo = os.environ.get("OX_REGISTRY_REPO", "registry").strip() or "registry"
     branch = os.environ.get("OX_REGISTRY_BRANCH", "main").strip() or "main"
     return f"https://raw.githubusercontent.com/{org}/{repo}/{branch}"
 
@@ -211,6 +254,42 @@ def _normalize_registry_url(base_url: str, value: str | None) -> str | None:
     if value.startswith("https://") or value.startswith("http://"):
         return value
     return f"{base_url}/{value.lstrip('/')}"
+
+
+def _is_remote_install_target(value: str) -> bool:
+    normalized = value.strip()
+    return (
+        normalized.startswith("https://")
+        or normalized.startswith("http://")
+        or normalized.startswith("git+")
+    )
+
+
+def _looks_like_release_path(value: str) -> bool:
+    normalized = value.strip()
+    return (
+        normalized.startswith("file://")
+        or normalized.startswith("/")
+        or "/" in normalized
+        or "\\" in normalized
+        or normalized.endswith(".whl")
+        or normalized.endswith(".tar.gz")
+        or normalized.endswith(".zip")
+    )
+
+
+def _extract_release_path(value: str) -> str | None:
+    normalized = value.strip()
+    if normalized.startswith("file://"):
+        normalized = urlparse(normalized).path
+    candidate = _normalize_release_path(normalized)
+    if candidate is None:
+        return None
+    for marker in ("workspace/packages/", "packages/", "workspace/package/", "package/"):
+        index = candidate.find(marker)
+        if index >= 0:
+            return candidate[index:]
+    return candidate
 
 
 def _resolve_release_file_url(

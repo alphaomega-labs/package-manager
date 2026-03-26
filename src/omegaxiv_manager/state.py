@@ -108,11 +108,26 @@ class StateStore:
         self._write(state)
 
     def _read(self) -> dict[str, object]:
+        default: dict[str, object] = {"installs": {}}
         if not self._path.exists():
-            return {"installs": {}}
-        data = json.loads(self._path.read_text(encoding="utf-8"))
+            return default
+        try:
+            raw = self._path.read_text(encoding="utf-8")
+            if not raw.strip():
+                return default
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            try:
+                corrupted = self._path.with_suffix(self._path.suffix + ".corrupted")
+                if not corrupted.exists():
+                    self._path.rename(corrupted)
+            except OSError:
+                pass
+            return default
+        except OSError:
+            return default
         if not isinstance(data, dict):
-            return {"installs": {}}
+            return default
         return data
 
     def _write(self, payload: dict[str, object]) -> None:

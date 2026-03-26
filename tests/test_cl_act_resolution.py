@@ -8,21 +8,21 @@ from omegaxiv_manager.registry import RegistryClient, ResolvedPackage
 
 
 def test_cl_act_requirements_resolve_to_package_repo_url() -> None:
-    client = RegistryClient("https://raw.githubusercontent.com/omegaXiv-labs/omegaxiv-registry/main")
+    client = RegistryClient("https://raw.githubusercontent.com/alphaomega-labs/registry/main")
     index_payload = {
         "handles": {
             "cl-act": {
                 "handle": "cl-act",
                 "latest_version": "0.1.3",
                 "record_path": "handles/cl-act.json",
-                "repo_url": "https://github.com/omegaXiv-labs/omegaXiv-run-bc36d98c-6b8e-435c-8783-221723ad93ff",
+                "repo_url": "https://github.com/alphaomega-labs/run-bc36d98c-6b8e-435c-8783-221723ad93ff",
             }
         }
     }
     record_payload = {
         "handle": "cl-act",
         "package_type": "library",
-        "repo_url": "https://github.com/omegaXiv-labs/omegaXiv-run-bc36d98c-6b8e-435c-8783-221723ad93ff",
+        "repo_url": "https://github.com/alphaomega-labs/run-bc36d98c-6b8e-435c-8783-221723ad93ff",
         "versions": [
             {
                 "version": "0.1.3",
@@ -36,7 +36,7 @@ def test_cl_act_requirements_resolve_to_package_repo_url() -> None:
     }
     expected_base = (
         "https://raw.githubusercontent.com/"
-        "omegaXiv-labs/omegaXiv-run-bc36d98c-6b8e-435c-8783-221723ad93ff/main"
+        "alphaomega-labs/run-bc36d98c-6b8e-435c-8783-221723ad93ff/main"
     )
     with (
         patch.object(RegistryClient, "_read_json", side_effect=[index_payload, record_payload]),
@@ -56,14 +56,14 @@ def test_ox_install_cl_act_passes_resolved_requirements_url_to_pip() -> None:
         install_target="activation-cl-validation",
         requirements_url=(
             "https://raw.githubusercontent.com/"
-            "omegaXiv-labs/omegaXiv-run-bc36d98c-6b8e-435c-8783-221723ad93ff/main/"
+            "alphaomega-labs/run-bc36d98c-6b8e-435c-8783-221723ad93ff/main/"
             "packages/cl-act/requirements.txt"
         ),
         dependency_graph_url=None,
         package_type="library",
         summary="",
-        record_url="https://raw.githubusercontent.com/omegaXiv-labs/omegaxiv-registry/main/handles/cl-act.json",
-        index_url="https://raw.githubusercontent.com/omegaXiv-labs/omegaxiv-registry/main/packages/index.json",
+        record_url="https://raw.githubusercontent.com/alphaomega-labs/registry/main/handles/cl-act.json",
+        index_url="https://raw.githubusercontent.com/alphaomega-labs/registry/main/packages/index.json",
     )
 
     class _FakeRegistry:
