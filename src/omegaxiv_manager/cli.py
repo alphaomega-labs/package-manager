@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import json
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 from omegaxiv_manager.registry import RegistryClient, ResolvedPackage
 from omegaxiv_manager.state import InstallState, StateStore
@@ -59,14 +61,25 @@ def _run_command(args: argparse.Namespace, registry: RegistryClient, state: Stat
     if args.command == "install":
         handle, version = _parse_spec(args.spec)
         resolved = registry.resolve(handle, version)
+        _ensure_resolved_release_is_consistent(resolved)
         existing = state.get(resolved.handle)
         mcp_target = getattr(args, "mcp_target", None)
+        reuse_drift_reason = (
+            _reuse_install_drift_reason(existing, resolved)
+            if mcp_target is not None
+            and existing is not None
+            and existing.version == resolved.version
+            else None
+        )
         skip_package_install = (
             mcp_target is not None
             and existing is not None
             and existing.version == resolved.version
+            and reuse_drift_reason is None
         )
         messages = []
+        if reuse_drift_reason is not None:
+            messages.append(f"tracked install drift detected; reinstalling ({reuse_drift_reason})")
         if skip_package_install:
             installed = existing
             assert installed is not None
@@ -126,6 +139,7 @@ def _run_command(args: argparse.Namespace, registry: RegistryClient, state: Stat
 
     if args.command == "upgrade":
         resolved = registry.resolve(args.handle, None)
+        _ensure_resolved_release_is_consistent(resolved)
         existing = state.get(resolved.handle) or state.get(args.handle)
         install_mode = _resolve_install_mode(
             package_type=resolved.package_type,
@@ -233,6 +247,50 @@ def _parse_spec(value: str) -> tuple[str, str | None]:
     if not version:
         raise SystemExit("version cannot be empty")
     return handle, version
+
+
+def _ensure_resolved_release_is_consistent(resolved: ResolvedPackage) -> None:
+    artifact_name = _artifact_filename(resolved.install_target)
+    if artifact_name is None:
+        return
+    if resolved.version in artifact_name:
+        return
+    raise SystemExit(
+        f"inconsistent registry release for {resolved.handle}=={resolved.version}: "
+        f"install target points at '{artifact_name}'"
+    )
+
+
+def _reuse_install_drift_reason(
+    installed: InstallState,
+    resolved: ResolvedPackage,
+) -> str | None:
+    if installed.install_target != resolved.install_target:
+        return "tracked install target differs from registry install target"
+    installed_version = _installed_distribution_version(installed.distribution_name)
+    if installed_version is None:
+        return f"installed distribution '{installed.distribution_name}' is missing"
+    if installed_version != resolved.version:
+        return (
+            f"installed distribution version is {installed_version}, "
+            f"expected {resolved.version}"
+        )
+    return None
+
+
+def _installed_distribution_version(distribution_name: str) -> str | None:
+    try:
+        return importlib.metadata.version(distribution_name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def _artifact_filename(target: str) -> str | None:
+    path = urlparse(target).path or target
+    filename = Path(path).name
+    if filename.endswith((".whl", ".tar.gz", ".zip")):
+        return filename
+    return None
 
 
 def _resolve_install_mode(
