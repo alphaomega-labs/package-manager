@@ -262,6 +262,11 @@ def _is_remote_install_target(value: str) -> bool:
         normalized.startswith("https://")
         or normalized.startswith("http://")
         or normalized.startswith("git+")
+        or normalized.startswith("ssh://")
+        or normalized.startswith("git@")
+        or normalized.startswith("hg+")
+        or normalized.startswith("svn+")
+        or normalized.startswith("bzr+")
     )
 
 

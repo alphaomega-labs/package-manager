@@ -77,7 +77,7 @@ def test_ox_install_cl_act_passes_resolved_requirements_url_to_pip() -> None:
             self.saved = None
 
         def get(self, _handle: str):
-            return None
+            return self.saved
 
         def upsert(self, **kwargs) -> None:
             self.saved = kwargs
